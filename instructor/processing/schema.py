@@ -8,8 +8,11 @@ without requiring inheritance from OpenAISchema or use of decorators.
 from __future__ import annotations
 
 import functools
+import inspect
+import re
 import warnings
-from typing import Any
+from enum import Enum
+from typing import Any, Dict, Type
 
 from docstring_parser import parse
 from pydantic import BaseModel
@@ -22,6 +25,36 @@ __all__ = [
     "generate_gemini_schema",
 ]
 
+
+def extract_enum_annotations(enum_class: Type[Enum]) -> Dict[str, str]:
+    """
+    Extract annotations (comments) from enum values.
+    
+    Args:
+        enum_class: The enum class to extract annotations from
+        
+    Returns:
+        A dictionary mapping enum values to their annotations
+    """
+    annotations = {}
+    
+    # Get the source code of the enum class
+    try:
+        source = inspect.getsource(enum_class)
+        
+        # Parse the source code to extract comments
+        for line in source.split('\n'):
+            # Look for lines with enum values and comments
+            match = re.search(r'(\w+)\s*=\s*["\']([^"\']+)["\'](?:\s*#\s*(.+))?', line)
+            if match:
+                enum_name, enum_value, comment = match.groups()
+                if comment:
+                    annotations[enum_value] = comment
+    except (OSError, TypeError):
+        # If we can't get the source code, return empty annotations
+        pass
+    
+    return annotations
 
 @functools.lru_cache(maxsize=256)
 def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
@@ -37,6 +70,7 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
     Note:
         The model's docstring will be used for the function description.
         Parameter descriptions from the docstring will enrich field descriptions.
+        Enum annotations (comments) will be included in the schema.
     """
     schema = model.model_json_schema()
     docstring = parse(model.__doc__ or "")
@@ -49,6 +83,32 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
         ):
             if "description" not in parameters["properties"][name]:
                 parameters["properties"][name]["description"] = description
+
+    # Process enum types in $defs section
+    if '$defs' in schema:
+        for type_name, type_schema in schema['$defs'].items():
+            if 'enum' in type_schema:
+                # Try to find the enum class in the model's module
+                module = inspect.getmodule(model)
+                if module:
+                    enum_class = getattr(module, type_name, None)
+                    if enum_class and issubclass(enum_class, Enum):
+                        annotations = extract_enum_annotations(enum_class)
+                        
+                        if annotations:
+                            # Format the annotations as specified
+                            enum_values = type_schema['enum']
+                            annotation_text = f"Options: {type_name}: An enumeration.\nValues:\n"
+                            
+                            for value in enum_values:
+                                annotation = annotations.get(value, value)
+                                annotation_text += f"{value}: {annotation}\n"
+                            
+                            # Add or append to the description
+                            if 'description' in type_schema:
+                                type_schema['description'] += "\n\n" + annotation_text
+                            else:
+                                type_schema['description'] = annotation_text
 
     parameters["required"] = sorted(
         k for k, v in parameters["properties"].items() if "default" not in v
