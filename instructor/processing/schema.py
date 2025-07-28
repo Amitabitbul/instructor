@@ -88,27 +88,52 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
     if '$defs' in schema:
         for type_name, type_schema in schema['$defs'].items():
             if 'enum' in type_schema:
-                # Try to find the enum class in the model's module
+                enum_class = None
+                
+                # First try to find the enum class in the model's module
                 module = inspect.getmodule(model)
                 if module:
                     enum_class = getattr(module, type_name, None)
-                    if enum_class and issubclass(enum_class, Enum):
-                        annotations = extract_enum_annotations(enum_class)
+                
+                # If not found, try to find it in the model's field annotations
+                if not enum_class or not (isinstance(enum_class, type) and issubclass(enum_class, Enum)):
+                    # Get type hints for the model
+                    try:
+                        type_hints = inspect.get_annotations(model)
+                        for field_name, field_type in type_hints.items():
+                            # Check if this field is the enum we're looking for
+                            if hasattr(field_type, "__name__") and field_type.__name__ == type_name:
+                                if isinstance(field_type, type) and issubclass(field_type, Enum):
+                                    enum_class = field_type
+                                    break
+                            # Handle the case where field_type is a generic type (like Optional[EnumType])
+                            elif hasattr(field_type, "__origin__") and hasattr(field_type, "__args__"):
+                                for arg in field_type.__args__:
+                                    if hasattr(arg, "__name__") and arg.__name__ == type_name:
+                                        if isinstance(arg, type) and issubclass(arg, Enum):
+                                            enum_class = arg
+                                            break
+                    except (TypeError, AttributeError):
+                        pass
+                
+                # If enum class is found, extract annotations
+                if enum_class and isinstance(enum_class, type) and issubclass(enum_class, Enum):
+                    annotations = extract_enum_annotations(enum_class)
+                    
+                    if annotations:
+                        # Format the annotations as specified
+                        enum_values = type_schema['enum']
+                        annotation_text = f"Options: {type_name}: An enumeration.\nValues:\n"
                         
-                        if annotations:
-                            # Format the annotations as specified
-                            enum_values = type_schema['enum']
-                            annotation_text = f"Options: {type_name}: An enumeration.\nValues:\n"
-                            
-                            for value in enum_values:
-                                annotation = annotations.get(value, value)
-                                annotation_text += f"{value}: {annotation}\n"
-                            
-                            # Add or append to the description
-                            if 'description' in type_schema:
-                                type_schema['description'] += "\n\n" + annotation_text
-                            else:
-                                type_schema['description'] = annotation_text
+                        for value in enum_values:
+                            annotation = annotations.get(value, value)
+                            annotation_text += f"{value}: {annotation}\n"
+                        
+                        # Add or append to the description
+                        if 'description' in type_schema:
+                            type_schema['description'] += "\n\n" + annotation_text
+                        else:
+                            type_schema['description'] = annotation_text
 
     parameters["required"] = sorted(
         k for k, v in parameters["properties"].items() if "default" not in v
