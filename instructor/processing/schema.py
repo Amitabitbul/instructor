@@ -154,44 +154,73 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
                     if annotations:
                         # Format the annotations as specified
                         enum_values = type_schema['enum']
-                        annotation_text = f"Values:\n"
+                        annotation_text = ''
 
                         for value in enum_values:
                             annotation = annotations.get(value, value)
-                            annotation_text += f"<{value}>: {annotation}\n"
+                            annotation_text += f"{value}: {annotation}\n"
 
                         # Store the annotation text for this enum type
                         enum_annotations_by_type[type_name] = annotation_text
     
-                        # Add or append to the description
-                        if 'description' in type_schema:
-                            type_schema['description'] += "\n\n" + annotation_text
-                        else:
-                            type_schema['description'] = annotation_text
+                        # # Add or append to the description
+                        # if 'description' in type_schema:
+                        #     type_schema['description'] += "\n\n" + annotation_text
+                        # else:
+                        #     type_schema['description'] = annotation_text
                             
-                        type_schema['description'] = type_schema.get('description', '') + "\n\n" + 'structure: <|key|>: value'
+                        # type_schema['description'] = type_schema.get('description', '')
     
-    # Now add enum annotations to property fields that reference enums
-    if enum_annotations_by_type and 'properties' in parameters:
+    # Helper function to recursively process properties and add enum annotations
+    def process_schema(schema, enum_annotations_by_type):
+        """
+        Recursively process a schema and add enum annotations to fields that reference enums.
+        
+        Args:
+            schema: Schema object to process
+            enum_annotations_by_type: Dictionary mapping enum type names to their annotations
+        """
+        # Process direct $ref
+        if '$ref' in schema:
+            ref_path = schema['$ref']
+            ref_type = ref_path.split('/')[-1]
+            
+            if ref_type in enum_annotations_by_type:
+                annotation_text = enum_annotations_by_type[ref_type]
+                if 'description' in schema:
+                    field_desc = schema['description']
+                    if field_desc and not field_desc.endswith(('.', '!', '?', ':', ';')):
+                        field_desc += "."
+                    schema['description'] = f"{field_desc}, Options: {annotation_text}"
+                else:
+                    schema['description'] = f"{annotation_text}"
+
+        # Process properties in objects
+        if 'properties' in schema:
+            for prop_name, prop_schema in schema['properties'].items():
+                process_schema(prop_schema, enum_annotations_by_type)
+        
+        # Process items in arrays
+        if 'items' in schema:
+            process_schema(schema['items'], enum_annotations_by_type)
+        
+        # Process anyOf, oneOf, allOf schemas
+        for schema_type in ['anyOf', 'oneOf', 'allOf']:
+            if schema_type in schema:
+                for sub_schema in schema[schema_type]:
+                    process_schema(sub_schema, enum_annotations_by_type)
+    
+    # Process all models in the $defs section
+    if '$defs' in parameters:
+        for model_name, model_schema in parameters['$defs'].items():
+            # Skip enum types as they've already been processed
+            if 'enum' not in model_schema:
+                process_schema(model_schema, enum_annotations_by_type)
+    
+    # Process the main schema properties
+    if 'properties' in parameters:
         for prop_name, prop_schema in parameters['properties'].items():
-            # Check if this property references an enum type
-            if '$ref' in prop_schema:
-                ref_path = prop_schema['$ref']
-                # Extract the type name from the reference path (e.g., "#/$defs/StatusEnum" -> "StatusEnum")
-                ref_type = ref_path.split('/')[-1]
-                
-                if ref_type in enum_annotations_by_type:
-                    # Add the enum annotations to the property description
-                    annotation_text = enum_annotations_by_type[ref_type]
-                    if 'description' in prop_schema:
-                        # Combine the field's description with the enum annotations in a more integrated way
-                        field_desc = prop_schema['description']
-                        # Check if the field description already ends with a period
-                        if field_desc and not field_desc.endswith(('.', '!', '?', ':', ';')):
-                            field_desc += "."
-                        prop_schema['description'] = f"{field_desc}, Options: {annotation_text}"
-                    else:
-                        prop_schema['description'] = annotation_text
+            process_schema(prop_schema, enum_annotations_by_type)
 
     parameters["required"] = sorted(
         k for k, v in parameters["properties"].items() if "default" not in v
