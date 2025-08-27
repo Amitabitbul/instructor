@@ -34,6 +34,7 @@ Instructor supports many providers, including:
 - Mistral AI
 - Groq
 - LiteLLM (meta-provider)
+- TrueFoundry AI Gateway
 - Various open-source models via Ollama, llama.cpp, etc.
 
 See the [Integrations](./integrations/index.md) section for the complete list.
