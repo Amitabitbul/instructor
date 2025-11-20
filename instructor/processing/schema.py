@@ -150,7 +150,7 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
                 # If enum class is found, extract annotations
                 if enum_class and isinstance(enum_class, type) and issubclass(enum_class, Enum):
                     annotations = extract_enum_annotations(enum_class)
-                    
+
                     if annotations:
                         # Format the annotations as specified
                         enum_values = type_schema['enum']
@@ -175,7 +175,7 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
     def process_schema(schema, enum_annotations_by_type):
         """
         Recursively process a schema and add enum annotations to fields that reference enums.
-        
+
         Args:
             schema: Schema object to process
             enum_annotations_by_type: Dictionary mapping enum type names to their annotations
@@ -184,7 +184,7 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
         if '$ref' in schema:
             ref_path = schema['$ref']
             ref_type = ref_path.split('/')[-1]
-            
+
             if ref_type in enum_annotations_by_type:
                 annotation_text = enum_annotations_by_type[ref_type]
                 if 'description' in schema:
@@ -199,15 +199,31 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
         if 'properties' in schema:
             for prop_name, prop_schema in schema['properties'].items():
                 process_schema(prop_schema, enum_annotations_by_type)
-        
+
         # Process items in arrays
         if 'items' in schema:
             process_schema(schema['items'], enum_annotations_by_type)
-        
+
         # Process anyOf, oneOf, allOf schemas
         for schema_type in ['anyOf', 'oneOf', 'allOf']:
             if schema_type in schema:
                 for sub_schema in schema[schema_type]:
+                    # Check if this sub-schema has a $ref to an enum
+                    if '$ref' in sub_schema:
+                        ref_path = sub_schema['$ref']
+                        ref_type = ref_path.split('/')[-1]
+                        if ref_type in enum_annotations_by_type:
+                            # Found an enum reference - update the PARENT schema's description
+                            annotation_text = enum_annotations_by_type[ref_type]
+                            if 'description' in schema:
+                                field_desc = schema['description']
+                                if field_desc and not field_desc.endswith(('.', '!', '?', ':', ';')):
+                                    field_desc += "."
+                                schema['description'] = f"{field_desc} Options: {annotation_text}"
+                            else:
+                                schema['description'] = f"{annotation_text}"
+
+                    # Continue recursive processing
                     process_schema(sub_schema, enum_annotations_by_type)
     
     # Process all models in the $defs section
