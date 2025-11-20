@@ -206,12 +206,18 @@ def handle_tools_strict(
     if response_model is None:
         return None, new_kwargs
 
-    response_model_schema = pydantic_function_tool(response_model)
+    # Use generate_openai_schema instead of pydantic_function_tool to ensure
+    # our patched schema generation (with enum annotations) is used
+    openai_schema = generate_openai_schema(response_model)
+    response_model_schema = {
+        "type": "function",
+        "function": openai_schema
+    }
     response_model_schema["function"]["strict"] = True
     new_kwargs["tools"] = [response_model_schema]
     new_kwargs["tool_choice"] = {
         "type": "function",
-        "function": {"name": response_model_schema["function"]["name"]},
+        "function": {"name": openai_schema["name"]},
     }
     return response_model, new_kwargs
 
