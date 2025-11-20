@@ -283,19 +283,9 @@ def _apply_enum_annotations(response_model: type[Any], schema: dict[str, Any]) -
     def process_schema_internal(schema_obj, enum_annotations):
         """Recursively process a schema and add enum annotations to fields that reference enums."""
         # Process direct $ref
-        if '$ref' in schema_obj:
-            ref_path = schema_obj['$ref']
-            ref_type = ref_path.split('/')[-1]
-
-            if ref_type in enum_annotations:
-                annotation_text = enum_annotations[ref_type]
-                if 'description' in schema_obj:
-                    field_desc = schema_obj['description']
-                    if field_desc and not field_desc.endswith(('.', '!', '?', ':', ';')):
-                        field_desc += "."
-                    schema_obj['description'] = f"{field_desc}, Options: {annotation_text}"
-                else:
-                    schema_obj['description'] = f"{annotation_text}"
+        # NOTE: We don't add description here because OpenAI strict mode
+        # doesn't allow description on schemas with $ref
+        # The description will be added to the parent field instead (see anyOf/oneOf/allOf handling)
 
         # Process properties in objects
         if 'properties' in schema_obj:

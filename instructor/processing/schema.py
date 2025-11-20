@@ -181,19 +181,9 @@ def generate_openai_schema(model: type[BaseModel]) -> dict[str, Any]:
             enum_annotations_by_type: Dictionary mapping enum type names to their annotations
         """
         # Process direct $ref
-        if '$ref' in schema:
-            ref_path = schema['$ref']
-            ref_type = ref_path.split('/')[-1]
-
-            if ref_type in enum_annotations_by_type:
-                annotation_text = enum_annotations_by_type[ref_type]
-                if 'description' in schema:
-                    field_desc = schema['description']
-                    if field_desc and not field_desc.endswith(('.', '!', '?', ':', ';')):
-                        field_desc += "."
-                    schema['description'] = f"{field_desc}, Options: {annotation_text}"
-                else:
-                    schema['description'] = f"{annotation_text}"
+        # NOTE: We don't add description here because OpenAI strict mode
+        # doesn't allow description on schemas with $ref
+        # The description will be added to the parent field instead (see anyOf/oneOf/allOf handling)
 
         # Process properties in objects
         if 'properties' in schema:
